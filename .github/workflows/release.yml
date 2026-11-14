@@ -1,0 +1,62 @@
+# Build floodgate-sqlite-database.jar with Guice 7 inject fix for Velocity 4.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build sqlite database jar
+        run: |
+          set -eux
+          ./gradlew :sqlite:shadowJar --no-daemon -x test
+          mkdir -p dist
+          cp database/sqlite/build/libs/floodgate-sqlite-database.jar dist/floodgate-sqlite-database.jar
+          test -f dist/floodgate-sqlite-database.jar
+          ls -lh dist
+
+      - name: Fail if this tag already has release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            count="$(gh release view "$tag" --json assets --jq '.assets | length')"
+            if [ "$count" != "0" ]; then
+              echo "tag $tag already has $count asset(s); bump the version instead of overwriting" >&2
+              exit 1
+            fi
+          fi
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          overwrite_files: false
+          files: dist/floodgate-sqlite-database.jar
+          generate_release_notes: true
+          body: |
+            Temporary fork of GeyserMC/Floodgate @ 81b65cc (2.2.5).
+
+            Fix: `SqliteDatabase` injects `dataDirectory` with `com.google.inject`
+            so own-linking works on Velocity 4 / Guice 7 (upstream still on
+            `javax.inject`; open PR #645 uses jakarta — we match Floodgate's own
+            `CommonModule` bindings instead).
+
+            Drop this fork when upstream ships a fixed floodgatedb build.
